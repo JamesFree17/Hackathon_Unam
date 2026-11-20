@@ -7,6 +7,22 @@ Herramienta de apoyo para decidir durante un partido. El coach elige su equipo, 
 
 Versión: **2.0.0**
 
+![Portada: la decisión correcta, en segundos](docs/portada.png)
+
+## Capturas
+
+**Ataque.** TB contra DAL en 3.er down y 7 yardas, con el balón en la 25 rival. La cancha marca hacia dónde lanzarle a cada receptor recomendado, y debajo aparecen la cobertura esperada, las mejores jugadas y a quién lanzarle.
+
+![Modo partido en ataque](docs/partido-ataque.png)
+
+**Defensa.** La misma situación desde el otro lado. La cancha sombrea las zonas donde el rival suele tirar y marca a quién cubrir, y debajo aparecen la formación esperada y las coberturas recomendadas.
+
+![Modo partido en defensa](docs/partido-defensa.png)
+
+**Método y validación.** Resultados de la prueba con semanas que el modelo no vio.
+
+![Cómo funciona y validación](docs/validacion.png)
+
 ---
 
 ## 1. Qué encontramos
