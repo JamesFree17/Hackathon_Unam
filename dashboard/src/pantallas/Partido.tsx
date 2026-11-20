@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { enviar, obtener, pct } from '../api'
+import Cancha from '../componentes/Cancha'
 import type {
-  Alineacion, Confianza, Distancia, Lado, Objetivo, Prob, RecAtaque, RecDefensa, Recomendacion, Situacion, Sustitucion, TextoIA, Zona,
+  Alineacion, Confianza, Lado, Objetivo, Prob, RecAtaque, RecDefensa, Recomendacion, Sustitucion, TextoIA,
 } from '../tipos'
 
 interface Props {
@@ -15,12 +16,7 @@ interface Props {
   onReiniciar: () => void
 }
 
-const DISTANCIAS: { v: Distancia; t: string }[] = [
-  { v: 'corta', t: 'Corta (1–3)' }, { v: 'media', t: 'Media (4–7)' }, { v: 'larga', t: 'Larga (8+)' },
-]
-const ZONAS: { v: Zona; t: string }[] = [
-  { v: 'propia', t: 'Campo propio' }, { v: 'medio', t: 'Medio campo' }, { v: 'ofensiva', t: 'Campo rival' }, { v: 'roja', t: 'Zona roja' },
-]
+const ATAJOS_DISTANCIA = [1, 2, 3, 5, 7, 10, 15, 20]
 
 function Boton({ activo, onClick, children }: { activo: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -59,7 +55,7 @@ function Barras({ datos }: { datos: Prob[] }) {
           <XAxis type="number" domain={[0, 1]} tickFormatter={v => `${Math.round(Number(v) * 100)}%`} />
           <YAxis type="category" dataKey="nombre" width={90} />
           <Tooltip formatter={v => pct(Number(v))} />
-          <Bar dataKey="prob">
+          <Bar dataKey="prob" isAnimationActive={false}>
             {datos.map((_, i) => <Cell key={i} fill={i === 0 ? '#2F7D4F' : '#9DBFAA'} />)}
           </Bar>
         </BarChart>
@@ -178,24 +174,32 @@ function VistaDefensa({ r, onSustituir }: { r: RecDefensa; onSustituir: (e: numb
 }
 
 export default function Partido({ equipo, rival, lado, alineacion, onCambiarAlineacion, onSustituir, onReiniciar }: Props) {
-  const [sit, setSit] = useState<Situacion>({ down: 1, distancia: 'media', zona: 'medio' })
+  const [down, setDown] = useState(1)
+  const [yardasMeta, setYardasMeta] = useState(70)      // yardas que faltan para la zona de anotación rival
+  const [yardasPrimero, setYardasPrimero] = useState(10)
+  const primeroEf = Math.min(yardasPrimero, yardasMeta)  // no se puede necesitar más que la meta
   const [rec, setRec] = useState<Recomendacion | null>(null)
   const [error, setError] = useState('')
   const [texto, setTexto] = useState<TextoIA | null>(null)
   const [reporte, setReporte] = useState<TextoIA | null>(null)
   const [cargandoReporte, setCargandoReporte] = useState(false)
 
-  const cuerpo = { equipo, rival, ...sit, titulares: alineacion.titulares, banca: alineacion.banca }
+  const cuerpo = {
+    equipo, rival, down, yardas_meta: yardasMeta, yardas_primero: primeroEf,
+    titulares: alineacion.titulares, banca: alineacion.banca,
+  }
   const clave = JSON.stringify(cuerpo)
 
-  // Recomendación rápida (solo estadística).
+  // Recomendación rápida (solo estadística). Pequeño retraso para no pedir en cada píxel al arrastrar.
   useEffect(() => {
     const ac = new AbortController()
     setError('')
-    enviar<Recomendacion>(`api/recomendacion/${lado}`, cuerpo, ac.signal)
-      .then(setRec)
-      .catch(e => { if (e.name !== 'AbortError') setError('No se pudo calcular la recomendación.') })
-    return () => ac.abort()
+    const t = setTimeout(() => {
+      enviar<Recomendacion>(`api/recomendacion/${lado}`, cuerpo, ac.signal)
+        .then(setRec)
+        .catch(e => { if (e.name !== 'AbortError') setError('No se pudo calcular la recomendación.') })
+    }, 150)
+    return () => { clearTimeout(t); ac.abort() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clave, lado])
 
@@ -241,14 +245,27 @@ export default function Partido({ equipo, rival, lado, alineacion, onCambiarAlin
       )}
 
       <section className="space-y-3 rounded-lg bg-gray-50 border p-3">
+        <Cancha
+          yardasMeta={yardasMeta}
+          yardasPrimero={primeroEf}
+          ofensiva={lado === 'ataque' ? equipo : rival}
+          defensiva={lado === 'ataque' ? rival : equipo}
+          rec={rec}
+          onYardasMeta={setYardasMeta}
+        />
         <div className="grid grid-cols-4 gap-2">
-          {[1, 2, 3, 4].map(d => <Boton key={d} activo={sit.down === d} onClick={() => setSit({ ...sit, down: d })}>{d}.º down</Boton>)}
+          {[1, 2, 3, 4].map(d => <Boton key={d} activo={down === d} onClick={() => setDown(d)}>{d}.º down</Boton>)}
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {DISTANCIAS.map(d => <Boton key={d.v} activo={sit.distancia === d.v} onClick={() => setSit({ ...sit, distancia: d.v })}>{d.t}</Boton>)}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {ZONAS.map(z => <Boton key={z.v} activo={sit.zona === z.v} onClick={() => setSit({ ...sit, zona: z.v })}>{z.t}</Boton>)}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold">Yardas para el primer down</span>
+          <button aria-label="Menos una yarda" onClick={() => setYardasPrimero(Math.max(1, primeroEf - 1))} className="rounded border-2 border-gray-300 w-11 h-11 text-xl font-bold">−</button>
+          <span className="w-8 text-center text-xl font-bold">{primeroEf}</span>
+          <button aria-label="Más una yarda" onClick={() => setYardasPrimero(Math.min(40, primeroEf + 1))} className="rounded border-2 border-gray-300 w-11 h-11 text-xl font-bold">+</button>
+          <div className="flex flex-wrap gap-1">
+            {ATAJOS_DISTANCIA.map(n => (
+              <button key={n} onClick={() => setYardasPrimero(n)} className={`rounded px-2 py-2 text-sm font-semibold border ${primeroEf === n ? 'bg-green-700 text-white border-green-700' : 'bg-white border-gray-300'}`}>{n}</button>
+            ))}
+          </div>
         </div>
       </section>
 

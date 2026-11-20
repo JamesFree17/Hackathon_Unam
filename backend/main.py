@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from . import datos, ia, modelo, plantilla, recomendar  # noqa: E402
+from . import datos, ia, modelo, plantilla, recomendar, validacion  # noqa: E402
 
 Distancia = Literal["corta", "media", "larga"]
 Zona = Literal["propia", "medio", "ofensiva", "roja"]
@@ -35,6 +35,7 @@ Lado = Literal["ataque", "defensa"]
 async def lifespan(_: FastAPI):
     modelo.base()  # calienta las tablas al arrancar (todo en memoria, sin escribir a disco)
     plantilla.tabla_completa()
+    validacion.iniciar()  # en segundo plano
     yield
 
 
@@ -42,11 +43,18 @@ app = FastAPI(title="Hackathon NFL UNAM", lifespan=lifespan)
 
 
 class Situacion(BaseModel):
+    """Situación de juego. Se puede dar en categorías (distancia, zona) o en yardas exactas.
+
+    Si vienen las yardas, mandan sobre las categorías.
+    """
+
     equipo: str = Field(min_length=2, max_length=4)
     rival: str = Field(min_length=2, max_length=4)
     down: int = Field(ge=1, le=4)
-    distancia: Distancia
-    zona: Zona
+    distancia: Distancia | None = None
+    zona: Zona | None = None
+    yardas_meta: int | None = Field(default=None, ge=1, le=99)      # yardas que faltan para la zona de anotación rival
+    yardas_primero: int | None = Field(default=None, ge=1, le=40)   # yardas que faltan para el primer down
     titulares: list[int] = Field(default_factory=list, max_length=60)
     banca: list[int] = Field(default_factory=list, max_length=60)
 
@@ -66,8 +74,14 @@ def _recomendar(lado: str, s: Situacion) -> dict:
     equipo, rival = _equipo(s.equipo), _equipo(s.rival)
     if equipo == rival:
         raise HTTPException(status_code=422, detail="El equipo y el rival deben ser distintos")
+    distancia = modelo.clasificar_distancia(s.yardas_primero) if s.yardas_primero is not None else s.distancia
+    zona = modelo.clasificar_zona(s.yardas_meta) if s.yardas_meta is not None else s.zona
+    if distancia is None or zona is None:
+        raise HTTPException(status_code=422, detail="Indica distancia y zona, o yardas_primero y yardas_meta")
     f = recomendar.recomendar_ataque if lado == "ataque" else recomendar.recomendar_defensa
-    return f(equipo, rival, s.down, s.distancia, s.zona, s.titulares, s.banca)
+    rec = f(equipo, rival, s.down, distancia, zona, s.titulares, s.banca)
+    rec["situacion"] = rec["situacion"] | {"yardas_meta": s.yardas_meta, "yardas_primero": s.yardas_primero}
+    return rec
 
 
 @app.get("/health")
@@ -105,6 +119,17 @@ def api_muestra(n: int = 10) -> list[dict]:
     b = modelo.base().head(max(1, min(n, 50)))
     cols = ["gameId", "playId", "possessionTeam", "pasador", "objetivo", "objetivo_id", "profundidad", "lado", "td_ofensivo", "yardas_meta"]
     return recomendar.limpiar(b[cols].to_dict("records"))
+
+
+@app.get("/api/hallazgos")
+def api_hallazgos() -> dict:
+    return modelo.hallazgos()
+
+
+@app.get("/api/validacion")
+def api_validacion() -> dict:
+    """Resultados de entrenar con las semanas 1-6 y probar en 7-8. Se calcula en segundo plano."""
+    return validacion.estado()
 
 
 @app.get("/api/rival/{abr}/cobertura")

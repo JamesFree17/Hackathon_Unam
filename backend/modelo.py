@@ -40,6 +40,7 @@ def base() -> pd.DataFrame:
     p = pd.concat([p, extraccion.extraer(p)], axis=1)
     p = p[p["down"].between(1, 4) & ~p["sin_jugada"] & (p["yardsToGo"] > 0)].copy()
 
+    p["semana"] = p["gameId"].map(datos.juegos().set_index("gameId")["week"])
     p["presion"] = p["presion"].astype(bool)
     p["down_g"] = p["down"].clip(upper=3).astype(int)
     p["dist"] = p["yardsToGo"].map(clasificar_distancia)
@@ -68,12 +69,14 @@ def _ordenar(probs: dict, top: int | None = None) -> list[dict]:
     return [{"nombre": str(k), "prob": round(float(v), 3)} for k, v in items]
 
 
-def probabilidades(col: str, rol_equipo: str, equipo: str, down: int, dist: str, zona: str, k: float = 20) -> dict:
+def probabilidades(col: str, rol_equipo: str, equipo: str, down: int, dist: str, zona: str, k: float = 20,
+                   b: pd.DataFrame | None = None) -> dict:
     """Distribución de `col` para `equipo` (como `possessionTeam` o `defensiveTeam`) en la situación.
 
     La liga es el prior (con zona si hay jugadas suficientes) y el equipo la ajusta.
+    `b` permite entrenar con un subconjunto de jugadas (validación fuera de muestra).
     """
-    b = base()
+    b = base() if b is None else b
     dg = min(down, 3)
     liga = b[(b["down_g"] == dg) & (b["dist"] == dist)]
     liga_zona = liga[liga["zona"] == zona]
@@ -88,9 +91,9 @@ def probabilidades(col: str, rol_equipo: str, equipo: str, down: int, dist: str,
     return {"probs": probs, "muestra": n, "muestra_liga": int(len(liga)), "confianza": confianza(n)}
 
 
-def cobertura_esperada(rival: str, down: int, dist: str, zona: str) -> dict:
-    cob = probabilidades("cobertura", "defensiveTeam", rival, down, dist, zona)
-    tipo = probabilidades("tipo_cob", "defensiveTeam", rival, down, dist, zona)
+def cobertura_esperada(rival: str, down: int, dist: str, zona: str, k: float = 20, b: pd.DataFrame | None = None) -> dict:
+    cob = probabilidades("cobertura", "defensiveTeam", rival, down, dist, zona, k, b)
+    tipo = probabilidades("tipo_cob", "defensiveTeam", rival, down, dist, zona, k, b)
     return {
         "coberturas": _ordenar(cob["probs"], 5),
         "tipos": _ordenar(tipo["probs"]),
@@ -115,9 +118,10 @@ def _suav(suma: float, n: float, prior: float, m: float) -> float:
     return (suma + m * prior) / (n + m)
 
 
-def opciones_ataque(dist: str, probs_cob: dict, m: float = 15, min_n: int = 40, top: int = 3) -> list[dict]:
+def opciones_ataque(dist: str, probs_cob: dict, m: float = 15, min_n: int = 40, top: int = 3,
+                    b: pd.DataFrame | None = None) -> list[dict]:
     """Mejores (formación, play action) esperados contra la cobertura probable del rival."""
-    b = base()
+    b = base() if b is None else b
     s = b[(b["dist"] == dist) & b["formacion"].notna()]
     campos = {"e": "exito", "y": "playResult", "sk": "sack", "it": "intercepcion"}
     agg = {"n": ("exito", "size")} | {k: (v, "sum") for k, v in campos.items()}
@@ -275,6 +279,25 @@ def zonas_rival(rival: str, down: int, dist: str, k: float = 15) -> dict:
     n = int(cuenta.sum())
     probs = {c: (cuenta.get(c, 0) + k * prior.get(c, 0.0)) / (n + k) for c in prior.index.union(cuenta.index)}
     return {"zonas": _ordenar(probs, 3), "muestra": n, "confianza": confianza(n)}
+
+
+def hallazgos() -> dict:
+    """Cifras principales del análisis, calculadas con los datos (no escritas a mano)."""
+    b = base()
+    cp, sp = b[b["presion"]], b[~b["presion"]]
+    pa, sin = b[b["pa"] == 1], b[b["pa"] == 0]
+    return {
+        "jugadas": int(len(b)),
+        "equipos": int(b["possessionTeam"].nunique()),
+        "juegos": int(b["gameId"].nunique()),
+        "tasa_presion": round(float(b["presion"].mean()), 3),
+        "exito_con_presion": round(float(cp["exito"].mean()), 3),
+        "exito_sin_presion": round(float(sp["exito"].mean()), 3),
+        "yardas_con_presion": round(float(cp["playResult"].mean()), 1),
+        "yardas_sin_presion": round(float(sp["playResult"].mean()), 1),
+        "exito_play_action": round(float(pa["exito"].mean()), 3),
+        "exito_sin_play_action": round(float(sin["exito"].mean()), 3),
+    }
 
 
 def perfil_equipo(equipo: str) -> dict:

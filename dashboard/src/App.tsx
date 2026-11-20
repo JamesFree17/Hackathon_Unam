@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import AlineacionPantalla from './pantallas/AlineacionPantalla'
 import Inicio from './pantallas/Inicio'
+import Metodo from './pantallas/Metodo'
 import Partido from './pantallas/Partido'
 import type { Alineacion, Lado } from './tipos'
 
@@ -8,6 +9,7 @@ type Paso = 'inicio' | 'alineacion' | 'partido'
 
 export default function App() {
   const [paso, setPaso] = useState<Paso>('inicio')
+  const [metodo, setMetodo] = useState(false)
   const [equipo, setEquipo] = useState('')
   const [rival, setRival] = useState('')
   const [lado, setLado] = useState<Lado>('ataque')
@@ -24,13 +26,25 @@ export default function App() {
 
   return (
     <main className="mx-auto max-w-3xl p-4 space-y-4">
-      <header>
-        <h1 className="text-2xl font-bold">Asistente del coach · NFL</h1>
-        <p className="text-sm text-gray-500">Jugadas de pase, semanas 1–8 de 2021. Recomendaciones basadas en estadística.</p>
+      <header className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-xl font-bold">Asistente del coach · NFL</h1>
+          <p className="text-xs text-gray-500">Jugadas de pase, semanas 1–8 de 2021</p>
+        </div>
+        {!metodo && (
+          <button onClick={() => setMetodo(true)} className="rounded border-2 border-gray-300 px-3 py-2 text-sm font-semibold">
+            Cómo funciona
+          </button>
+        )}
       </header>
 
+      {metodo && <Metodo onVolver={() => setMetodo(false)} />}
+
+      {/* Se mantiene montado (solo oculto) para no perder la situación del partido al abrir el método. */}
+      <div className={metodo ? 'hidden' : 'space-y-4'}>
       {paso === 'inicio' && (
         <Inicio
+          onMetodo={() => setMetodo(true)}
           onContinuar={(e, r, l) => {
             setEquipo(e); setRival(r); setLado(l); setAlineacion(null); setPaso('alineacion')
           }}
@@ -56,6 +70,7 @@ export default function App() {
           onReiniciar={() => setPaso('inicio')}
         />
       )}
+      </div>
     </main>
   )
 }

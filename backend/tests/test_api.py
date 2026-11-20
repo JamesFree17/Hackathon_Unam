@@ -57,3 +57,29 @@ def test_ia_usa_respaldo_si_falla(monkeypatch):
     assert rep["fuente"] == "plantilla" and "DAL" in rep["texto"]
     rep2 = c.get("/api/ia/reporte/DAL", params={"equipo": "TB", "lado": "defensa"}).json()
     assert rep2["fuente"] == "plantilla" and rep2["texto"]
+
+
+def test_yardas_exactas_mandan_sobre_las_categorias():
+    cuerpo = {"equipo": "TB", "rival": "DAL", "down": 3, "yardas_meta": 15, "yardas_primero": 2}
+    r = c.post("/api/recomendacion/ataque", json=cuerpo).json()
+    assert r["situacion"]["zona"] == "roja" and r["situacion"]["distancia"] == "corta"
+    assert r["situacion"]["yardas_meta"] == 15
+    # Si hay yardas y categorías, ganan las yardas.
+    r2 = c.post("/api/recomendacion/ataque", json=cuerpo | {"zona": "propia", "distancia": "larga"}).json()
+    assert r2["situacion"]["zona"] == "roja"
+    # Sin ninguna de las dos es un error de validación.
+    assert c.post("/api/recomendacion/ataque", json={"equipo": "TB", "rival": "DAL", "down": 1}).status_code == 422
+    assert c.post("/api/recomendacion/ataque", json=cuerpo | {"yardas_meta": 150}).status_code == 422
+
+
+def test_hallazgos_son_coherentes():
+    h = c.get("/api/hallazgos").json()
+    assert h["equipos"] == 32 and h["juegos"] == 122
+    assert h["exito_sin_presion"] > h["exito_con_presion"]
+
+
+def test_validacion_devuelve_estado(monkeypatch):
+    from backend import validacion
+
+    monkeypatch.setattr(validacion, "estado", lambda: {"estado": "calculando", "resultado": None})
+    assert c.get("/api/validacion").json() == {"estado": "calculando", "resultado": None}

@@ -1,11 +1,11 @@
-# Asistente del coach · NFL Big Data Bowl (UNAM)
+﻿# Asistente del coach · NFL Big Data Bowl (UNAM)
 
 Herramienta de apoyo para decidir durante un partido. El coach elige su equipo, el rival y si asesora al **ataque** o a la **defensa**. Marca sus titulares y su banca, y toca botones (down, distancia y zona del campo) para recibir recomendaciones al instante, sin escribir nada.
 
 - Si somos **ataque**: qué defensa esperar, qué jugadas funcionan mejor contra ella, a qué receptor lanzarle y a quién sustituir.
 - Si somos **defensa**: qué formación esperar, qué cobertura usar, a quién cubrir y qué defensor mete más presión.
 
-Versión: **1.0.1**
+Versión: **2.0.0**
 
 ---
 
@@ -37,10 +37,22 @@ Esto lleva a la decisión de producto: las recomendaciones no son genéricas. Co
 - **IA (Amazon Nova en Bedrock):** solo redacta el resumen y el reporte previo con cifras ya calculadas. No calcula ni predice. Si falla, la app muestra un texto automático y todo lo demás funciona igual.
 
 **Validación.**
-- 25 pruebas automáticas (`pytest`) sobre extracción, plantilla, modelo, API y el respaldo cuando la IA falla.
+- 28 pruebas automáticas (`pytest`) sobre extracción, plantilla, modelo, API y el respaldo cuando la IA falla.
 - La extracción identifica al receptor en el **94.9%** de los pases y la mayoría se une con su `nflId` (99.7% de los identificados).
 - Las probabilidades suman 1, un rival sin datos usa el promedio de la liga y el ranking respeta la alineación elegida.
 - De las 8,557 jugadas originales se descartan 524: 489 anuladas por penalización ("No Play" o "NULLIFIED") y 35 sin down válido. Quedan 8,033.
+
+**Validación fuera de muestra.** Entrenamos con las semanas 1 a 6 (6,199 jugadas) y evaluamos en las semanas 7 y 8 (1,834 jugadas), que el modelo no vio. Se recalcula al arrancar el servidor (tarda cerca de un minuto, en segundo plano) y se ve en la app, en "Cómo funciona".
+
+| Predecir la cobertura del rival | Acierta la 1.ª | Está entre las 3 primeras | Error (log-loss, menor es mejor) |
+|---|---|---|---|
+| Frecuencia global | 33.3% | 68.9% | 1.841 |
+| Promedio de la liga en esa situación | 36.3% | 69.5% | 1.742 |
+| **Nuestro modelo (historial del rival, suavizado)** | **36.9%** | **75.3%** | **1.698** |
+
+La mejora es real pero moderada: acertar la cobertura exacta es difícil (12 tipos que cada equipo mezcla). La constante de suavizado k = 20 se comparó con 2, 5, 10, 40 y 80. k = 40 queda marginalmente mejor en error (1.691), así que k = 20 es razonable pero no se afinó.
+
+Las jugadas que coinciden con nuestro top 3 recomendado tuvieron **56.8%** de éxito (512 jugadas) contra **43.8%** del resto (1,322): diferencia de 13 puntos (intervalo de confianza 95%: 8 a 18). Es una asociación, no una causa: las jugadas que coinciden pueden darse en situaciones más favorables.
 
 **Límites que conviene conocer.**
 - Los hallazgos son asociaciones, no causas. Además, un sack cuenta como presión, así que parte de la diferencia del hallazgo 1 es mecánica.
@@ -48,7 +60,7 @@ Esto lleva a la decisión de producto: las recomendaciones no son genéricas. Co
 - Solo hay jugadas de pase: la app no recomienda pase contra carrera.
 - No medimos la calidad individual de cobertura. La sustitución defensiva compara solo presión (DL y LB).
 - El marcador no entra al modelo porque la muestra se vuelve demasiado pequeña.
-- No hicimos una validación predictiva con datos separados (por ejemplo, entrenar con semanas 1-6 y probar con 7-8). Es el siguiente paso natural.
+- La validación fuera de muestra (sección 2) muestra una mejora real pero moderada al predecir la cobertura. La prueba de las jugadas recomendadas es una asociación y puede mezclar el efecto de la situación. No hay una prueba controlada.
 
 ## 3. Cómo ejecutarlo
 
@@ -105,7 +117,8 @@ Abre http://localhost:5173. Vite redirige `/api` al puerto 8000.
 
 1. **Inicio:** elige tu equipo, el rival y Ataque o Defensa.
 2. **Alineación:** ya vienen marcados los titulares sugeridos. Toca a un jugador para moverlo entre titulares y banca.
-3. **Partido:** elige down, distancia y zona. Arriba aparece un resumen en una o dos frases y debajo el detalle con confianza y muestra. Las sustituciones sugeridas se aplican con un botón. El botón "Reporte previo" resume al rival.
+3. **Partido:** toca o arrastra la **cancha** (120 yardas) para colocar el balón, elige el down y las yardas para el primer down. En ataque, la cancha dibuja hacia dónde lanzarle a cada receptor recomendado. En defensa, sombrea las zonas donde el rival suele tirar y marca a quién cubrir. Arriba aparece un resumen en una o dos frases y debajo el detalle con confianza y muestra. Las sustituciones sugeridas se aplican con un botón. El botón "Reporte previo" resume al rival.
+4. **Cómo funciona:** método, validación y límites, con los resultados de la sección 2.
 
 ## 5. Estructura y API
 
@@ -126,6 +139,10 @@ data/           datos (solo lectura, no se versionan)
 | `POST /api/recomendacion/defensa` | Formación, coberturas, a quién cubrir y presión |
 | `POST /api/ia/explicacion` | Resumen en lenguaje natural (IA o respaldo) |
 | `GET /api/ia/reporte/{rival}?equipo=&lado=` | Reporte previo al partido |
+| `GET /api/hallazgos` | Cifras principales del análisis (se calculan, no están escritas a mano) |
+| `GET /api/validacion` | Resultados de la validación fuera de muestra (`calculando` o `listo`) |
+
+Las recomendaciones aceptan la situación en yardas exactas (`yardas_meta`, `yardas_primero`) o en categorías (`distancia`, `zona`). Si vienen las dos, mandan las yardas.
 
 ## 6. Stack
 
